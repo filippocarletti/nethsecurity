@@ -5,7 +5,6 @@
 # SPDX-License-Identifier: GPL-2.0-only
 #
 
-import base64
 import json
 import os
 import shutil
@@ -39,11 +38,11 @@ def create_backup(encrypted=True):
                 '/usr/bin/gpg',
                 '--symmetric',
                 '--batch',
-                '--passphrase', passphrase,
+                '--passphrase-fd', '0',
                 '--output', encrypted_path,
                 '--yes',
                 backup_path
-            ], check=True, capture_output=True)
+            ], input=passphrase, text=True, check=True, capture_output=True)
             # remove original backup
             os.remove(backup_path)
             return f'{file_name}.gpg'
@@ -62,11 +61,11 @@ def restore_backup(archive, passphrase=None):
                 '/usr/bin/gpg',
                 '--decrypt',
                 '--batch',
-                '--passphrase', passphrase,
+                '--passphrase-fd', '0',
                 '--output', f'{archive}.decrypted',
                 '--yes',
                 archive
-            ], check=True, capture_output=True)
+            ], input=passphrase, text=True, check=True, capture_output=True)
             shutil.move(f'{archive}.decrypted', archive)
 
         # run sysupgrade to restore backup file
@@ -150,11 +149,13 @@ elif cmd == 'call':
             if data['passphrase'] == '':
                 os.remove(PASSPHRASE_PATH)
             else:
-                open(PASSPHRASE_PATH, 'w').write(data['passphrase'])
+                fd = os.open(PASSPHRASE_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with open(fd, 'w') as f:
+                    f.write(data['passphrase'])
             print(json.dumps({'message': 'success'}))
-        except IOError as error:
-            print(json.dumps(utils.generic_error(f'passphrase write failed')))
-        except KeyError as error:
+        except IOError:
+            print(json.dumps(utils.generic_error('passphrase write failed')))
+        except KeyError:
             print(json.dumps(utils.validation_error('passphrase', 'required')))
 
     elif action == 'registered-list-backups':
@@ -166,8 +167,8 @@ elif cmd == 'call':
                 print(json.dumps({'values': json.loads(completed_process.stdout)}))
             else:
                 print(json.dumps({'values': []}))
-        except subprocess.CalledProcessError as error:
-            print(json.dumps(utils.generic_error(f'remote list failed')))
+        except subprocess.CalledProcessError:
+            print(json.dumps(utils.generic_error('remote list failed')))
 
     elif action == 'registered-backup':
         if os.path.exists(PASSPHRASE_PATH):
@@ -181,8 +182,8 @@ elif cmd == 'call':
                                                capture_output=True)
             os.remove(backup_path)
             print(json.dumps({'message': 'success'}))
-        except subprocess.CalledProcessError as error:
-            print(json.dumps(utils.generic_error(f'remote upload failed')))
+        except subprocess.CalledProcessError:
+            print(json.dumps(utils.generic_error('remote upload failed')))
         except RuntimeError as error:
             print(json.dumps(utils.generic_error(error.args[0])))
 
@@ -199,9 +200,9 @@ elif cmd == 'call':
             subprocess.run(['/sbin/reboot'], check=True, capture_output=True)
             # reboot takes a few seconds to complete, enough to send the response
             print(json.dumps({'message': 'success'}))
-        except subprocess.CalledProcessError as error:
+        except subprocess.CalledProcessError:
             print(json.dumps(utils.generic_error('remote backup download failed')))
-        except KeyError as error:
+        except KeyError:
             print(json.dumps(utils.validation_error('file', 'required')))
         except RuntimeError as error:
             print(json.dumps(utils.validation_error('passphrase',error.args[0])))
@@ -217,9 +218,9 @@ elif cmd == 'call':
                            check=True, capture_output=True)
             # return content
             print(json.dumps({'backup': file_name}))
-        except subprocess.CalledProcessError as error:
+        except subprocess.CalledProcessError:
             print(json.dumps(utils.generic_error('remote backup download failed')))
-        except KeyError as error:
+        except KeyError:
             print(json.dumps(utils.validation_error('file', 'required')))
 
     elif action == 'registered-delete-backup':
@@ -229,9 +230,9 @@ elif cmd == 'call':
                            check=True, capture_output=True, text=True)
             # return content
             print(p.stdout)
-        except subprocess.CalledProcessError as error:
+        except subprocess.CalledProcessError:
             print(json.dumps(utils.generic_error('remote backup delete failed')))
-        except KeyError as error:
+        except KeyError:
             print(json.dumps(utils.validation_error('id', 'required')))
 
     elif action == 'is-passphrase-set':
